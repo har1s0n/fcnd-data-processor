@@ -88,10 +88,10 @@ if __name__ == "__main__":
     if __name__ == "__main__":
         parser = argparse.ArgumentParser(
             description='File collector from the federal navigation data center FCND')
-        parser.add_argument('--d_begin', type=validate_datetime, dest='dt_begin',
+        parser.add_argument('--dt_begin', type=validate_datetime, dest='dt_begin',
                             default=(datetime.date.today() - datetime.timedelta(days=1)).strftime('%d-%m-%Y %H:%M:%S'),
                             help="start of file collection (format: DD-MM-YYYY hh:mm:ss")
-        parser.add_argument('--d_end', type=validate_datetime, dest='dt_end',
+        parser.add_argument('--dt_end', type=validate_datetime, dest='dt_end',
                             default=datetime.date.today().strftime('%d-%m-%Y %H:%M:%S'),
                             help="end of file collection (format: DD-MM-YYYY hh:mm:ss")
         parser.add_argument('--collection', type=str, dest='collection',
@@ -102,4 +102,4 @@ if __name__ == "__main__":
         dt_begin = args.dt_begin
         dt_end = args.dt_end
         collection = args.collection
-    # main()
+    main()
