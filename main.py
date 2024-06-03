@@ -76,7 +76,7 @@ def validate_datetime(datetime_str):
     """
     pattern = r"^\d{2}-\d{2}-\d{4}\s\d{2}:\d{2}:\d{2}$"
     if not re.match(pattern, datetime_str):
-        raise argparse.ArgumentTypeError("Неверный формат даты и времени. Должен быть в формате DD-MM-YYYY hh:mm:ss.")
+        raise argparse.ArgumentTypeError("Неверный формат даты и времени (требуемый формат: DD-MM-YYYY hh:mm:ss).")
     try:
         datetime.datetime.strptime(datetime_str, "%d-%m-%Y %H:%M:%S")
     except ValueError:
@@ -89,10 +89,10 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser(
             description='File collector from the federal navigation data center FCND')
         parser.add_argument('--d_begin', type=validate_datetime, dest='dt_begin',
-                            default=str(datetime.date.today()),
+                            default=(datetime.date.today() - datetime.timedelta(days=1)).strftime('%d-%m-%Y %H:%M:%S'),
                             help="start of file collection (format: DD-MM-YYYY hh:mm:ss")
         parser.add_argument('--d_end', type=validate_datetime, dest='dt_end',
-                            default=str(datetime.date.today()),
+                            default=datetime.date.today().strftime('%d-%m-%Y %H:%M:%S'),
                             help="end of file collection (format: DD-MM-YYYY hh:mm:ss")
         parser.add_argument('--collection', type=str, dest='collection',
                             default='IAC_SDCM_gnss_data_daily_30sec',
