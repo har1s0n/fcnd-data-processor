@@ -6,9 +6,22 @@ import datetime
 import os
 import re
 import concurrent.futures
+from typing import List, Dict, Any
 
 
-def get_collection_id(collection_name):
+def get_collection_id(collection_name: str) -> int:
+    """
+    Получает идентификатор коллекции по имени.
+
+    Args:
+        collection_name (str): Иимя коллекции.
+
+    Returns:
+        int: Идентификатор коллекции.
+
+    Raises:
+        ValueError: Если коллекция с заданным именем не найдена.
+    """
     response = requests.get("https://fcnd.ru/api/getFilter/")
     response.raise_for_status()
     data = response.json()
@@ -19,7 +32,18 @@ def get_collection_id(collection_name):
     raise ValueError(f"Collection '{collection_name}' not found.")
 
 
-def get_files_list(collection_id, dt_begin, dt_end):
+def get_files_list(collection_id: int, dt_begin: str, dt_end: str) -> List[Dict[str, Any]]:
+    """
+    Получает список файлов для заданной коллекции и периода времени.
+
+    Args:
+        collection_id (int): Идентификатор коллекции.
+        dt_begin (str): Начальная дата и время в формате 'DD-MM-YYYY hh:mm:ss'.
+        dt_end (str): Конечная дата и время в формате 'DD-MM-YYYY hh:mm:ss'.
+
+    Returns:
+        List[Dict[str, Any]]: Список файлов.
+    """
     url = "https://fcnd.ru/api/getData/"
     params = {
         "filter[time_begin]": dt_begin,
@@ -31,7 +55,16 @@ def get_files_list(collection_id, dt_begin, dt_end):
     return response.json()
 
 
-def filter_files(files_list):
+def filter_files(files_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+     Фильтрует список файлов на основе заданных шаблонов.
+
+     Args:
+         files_list (List[Dict[str, Any]]): Список файлов для фильтрации.
+
+     Returns:
+         List[Dict[str, Any]]: Отфильтрованный список файлов.
+     """
     file_patterns = [
         r"\.\d{2}g\.Z$",
         r"RN\.rnx",
@@ -42,7 +75,17 @@ def filter_files(files_list):
         pattern in file_patterns)]
 
 
-def download_file(file, download_dir):
+def download_file(file: Dict[str, Any], download_dir: str) -> str:
+    """
+    Загружает файл по его параметрам и сохраняет в указанную директорию.
+
+    Args:
+        file (Dict[str, Any]): Информация о файле для загрузки.
+        download_dir (str): Путь к директории для сохранения файла.
+
+    Returns:
+        str: Имя загруженного файла.
+    """
     time_begin = file["pt_time_begin"]
     file_name = file["pk_file_name"]
     url = f"https://fcnd.ru/api/getData/"
@@ -60,7 +103,14 @@ def download_file(file, download_dir):
     return file_name
 
 
-def extract_file(file_name, download_dir):
+def extract_file(file_name: str, download_dir: str) -> None:
+    """
+    Распаковывает архивный файл и удаляет его после успешной распаковки.
+
+    Args:
+        file_name (str): Имя файла для распаковки.
+        download_dir (str): Путь к директории, где находится файл.
+    """
     file_path = os.path.join(download_dir, file_name)
     if file_name.endswith(".zip"):
         with zipfile.ZipFile(file_path, 'r') as zip_file:
@@ -77,7 +127,15 @@ def extract_file(file_name, download_dir):
         subprocess.run(f"gunzip -f {file_path}", shell=True)
 
 
-def main(dt_begin, dt_end, collection_name):
+def main(dt_begin: str, dt_end: str, collection_name: str) -> None:
+    """
+    Основная функция, которая управляет процессом загрузки и распаковки файлов.
+
+    Args:
+        dt_begin (str): Начальная дата и время в формате 'DD-MM-YYYY hh:mm:ss'.
+        dt_end (str): Конечная дата и время в формате 'DD-MM-YYYY hh:mm:ss'.
+        collection_name (str): Имя коллекции для загрузки файлов.
+    """
     download_dir = "./downloads"
 
     if not os.path.exists(download_dir):
@@ -100,7 +158,19 @@ def main(dt_begin, dt_end, collection_name):
         print(f"An error occurred: {e}")
 
 
-def validate_datetime(datetime_str):
+def validate_datetime(datetime_str: str) -> str:
+    """
+    Валидирует строку с датой и временем, соответствующую формату 'DD-MM-YYYY hh:mm:ss'.
+
+    Args:
+        datetime_str (str): Строка с датой и временем для валидации.
+
+    Returns:
+        str: Валидированная строка с датой и временем.
+
+    Raises:
+        argparse.ArgumentTypeError: Если формат даты и времени неверен.
+    """
     pattern = r"^\d{2}-\d{2}-\d{4}\s\d{2}:\d{2}:\d{2}$"
     if not re.match(pattern, datetime_str):
         raise argparse.ArgumentTypeError("Неверный формат даты и времени (требуемый формат: DD-MM-YYYY hh:mm:ss).")
