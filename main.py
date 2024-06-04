@@ -32,20 +32,14 @@ def get_files_list(collection_id, dt_begin, dt_end):
 
 
 def filter_files(files_list):
-    filtered_files = []
     file_patterns = [
         r"\.\d{2}g\.Z$",
         r"RN\.rnx",
         lambda filename: filename.endswith(".zip") and not re.search(r"\.rnx", filename)
     ]
-
-    for file in files_list:
-        file_name = file["pk_file_name"]
-        if any(re.search(pattern, file_name) if isinstance(pattern, str) else pattern(file_name) for pattern in
-               file_patterns):
-            filtered_files.append(file)
-
-    return filtered_files
+    return [file for file in files_list if any(
+        re.search(pattern, file["pk_file_name"]) if isinstance(pattern, str) else pattern(file["pk_file_name"]) for
+        pattern in file_patterns)]
 
 
 def download_file(file, download_dir):
@@ -63,6 +57,7 @@ def download_file(file, download_dir):
         for chunk in response.iter_content(chunk_size=8192):
             file.write(chunk)
     print(f"Downloaded: {file_name}")
+    return file_name
 
 
 def extract_file(file_name, download_dir):
@@ -77,6 +72,7 @@ def extract_file(file_name, download_dir):
                     if re.search(r"\.\d{2}g", extracted_file):
                         zip_file.extract(extracted_file, download_dir)
                         break
+        os.remove(file_path)
     elif file_name.endswith(".Z"):
         subprocess.run(f"gunzip -f {file_path}", shell=True)
 
@@ -92,10 +88,13 @@ def main(dt_begin, dt_end, collection_name):
         files_list = get_files_list(collection_id, dt_begin, dt_end)
         filtered_file_list = filter_files(files_list)
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            for file in filtered_file_list:
-                executor.submit(download_file, file, download_dir)
-                executor.submit(extract_file, file['pk_file_name'], download_dir)
+        with concurrent.futures.ThreadPoolExecutor() as download_executor:
+            future_to_file = {download_executor.submit(download_file, file, download_dir): file for file in
+                              filtered_file_list}
+            with concurrent.futures.ThreadPoolExecutor() as extract_executor:
+                for future in concurrent.futures.as_completed(future_to_file):
+                    file_name = future.result()
+                    extract_executor.submit(extract_file, file_name, download_dir)
 
     except Exception as e:
         print(f"An error occurred: {e}")
