@@ -5,6 +5,7 @@ import argparse
 import datetime
 import os
 import re
+import platform
 import concurrent.futures
 from typing import List, Dict, Any
 
@@ -103,6 +104,21 @@ def download_file(file: Dict[str, Any], download_dir: str) -> str:
     return file_name
 
 
+def get_unix_path(win_path):
+    return win_path.replace('\\', '/')
+
+
+def get_win_path(unix_path):
+    unix_path = unix_path.replace('/', '\\')
+    if unix_path.startswith('\\'):
+        win_path = unix_path
+    else:
+        drive_letter = os.path.splitdrive(os.getcwd())[0]
+        win_path = f'{drive_letter}{unix_path}'
+
+    return win_path
+
+
 def extract_file(file_name: str, download_dir: str) -> None:
     """
     Распаковывает архивный файл и удаляет его после успешной распаковки.
@@ -124,7 +140,80 @@ def extract_file(file_name: str, download_dir: str) -> None:
                         break
         os.remove(file_path)
     elif file_name.endswith(".Z"):
-        subprocess.run(f"gunzip -f {file_path}", shell=True)
+        if platform.system().lower() == "windows":
+            subprocess.run(
+                f"\"C:\Program Files\Git\\bin\\bash.exe\" -c \"gunzip -f {get_unix_path(os.path.abspath(file_path))}\"",
+                shell=True)
+        else:
+            subprocess.run(f"gunzip -f {file_path}", shell=True)
+
+
+def extract_info_from_filename(filename: str) -> (str, int):
+    """
+    Извлекает имя станции и год из имени файла Rinex 3.
+
+    Args:
+        filename (str): Имя файла Rinex 3.
+
+    Returns:
+        tuple: Имя станции и год в формате YY.
+    """
+    base_name = os.path.basename(filename)
+    station_name = base_name[:4]
+    year_str = base_name.split('_')[1][:4]
+    year_full = int(year_str)
+    return station_name, year_full
+
+
+def convert_rinex3_nav_to_rinex2(input_file: str, output_dir: str) -> str:
+    """
+    Конвертирует файл Rinex 3 навигационных данных в Rinex 2 с использованием утилиты convbin.
+
+    Args:
+        input_file (str): Путь к входному файлу Rinex 3.
+        output_dir (str): Директория для сохранения выходного файла Rinex 2.
+
+    Returns:
+        str: Путь к выходному файлу Rinex 2.
+    """
+    system = platform.system().lower()
+
+    convbin_executable = ""
+    if system == "windows":
+        convbin_executable = os.path.join("executables", "convbin_win", "convbin.exe")
+    elif system == "linux":
+        convbin_executable = os.path.join("executables", "convbin_linux", "convbin")
+    elif system == "darwin":  # macOS
+        convbin_executable = os.path.join("executables", "convbin_mac", "convbin")
+    else:
+        raise OSError("Unsupported operating system")
+
+    if not os.path.isfile(convbin_executable):
+        raise FileNotFoundError(f"convbin executable not found: {convbin_executable}")
+
+    station_name, year_full = extract_info_from_filename(input_file)
+    year_suffix = str(year_full)[-2:]
+
+    current_date = datetime.datetime.now()
+    day_of_year = current_date.timetuple().tm_yday
+
+    output_file_name = f"{station_name}{day_of_year:03d}0.{year_suffix}g"
+    output_file = os.path.join(output_dir, output_file_name)
+
+    command = [convbin_executable, input_file, "-r", "rinex3", "-n", output_file]
+
+    try:
+        result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print(f"Conversion output: {result.stdout.decode('utf-8')}")
+        print(f"Conversion errors: {result.stderr.decode('utf-8')}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error during conversion: {e.stderr.decode('utf-8')}")
+        raise
+
+    if not os.path.isfile(output_file):
+        raise FileNotFoundError(f"Output file not found: {output_file}")
+
+    return output_file
 
 
 def main(dt_begin: str, dt_end: str, collection_name: str) -> None:
@@ -145,6 +234,7 @@ def main(dt_begin: str, dt_end: str, collection_name: str) -> None:
         collection_id = get_collection_id(collection_name)
         files_list = get_files_list(collection_id, dt_begin, dt_end)
         filtered_file_list = filter_files(files_list)
+        unpacked_files = list()
 
         with concurrent.futures.ThreadPoolExecutor() as download_executor:
             future_to_file = {download_executor.submit(download_file, file, download_dir): file for file in
@@ -153,6 +243,9 @@ def main(dt_begin: str, dt_end: str, collection_name: str) -> None:
                 for future in concurrent.futures.as_completed(future_to_file):
                     file_name = future.result()
                     extract_executor.submit(extract_file, file_name, download_dir)
+                    test = file_name.split('.')
+                    test2 = '.'.join(test[:-1])
+                    unpacked_files.append(file_name.split('.')[-1])
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -197,3 +290,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args.dt_begin, args.dt_end, args.collection)
+
+    # try:
+    #     output_rinex2_nav = convert_rinex3_nav_to_rinex2(input_rinex3_nav, output_directory)
+    #     print(f"Converted file saved to: {output_rinex2_nav}")
+    # except Exception as e:
+    #     print(f"An error occurred: {e}")
