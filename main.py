@@ -7,6 +7,7 @@ import os
 import re
 import platform
 import concurrent.futures
+from rinex_merger import RinexMerger
 from typing import List, Dict, Any
 
 
@@ -148,21 +149,23 @@ def extract_file(file_name: str, download_dir: str) -> None:
             subprocess.run(f"gunzip -f {file_path}", shell=True)
 
 
-def extract_info_from_filename(filename: str) -> (str, int):
+def extract_info_from_filename(filename: str) -> (str, int, int):
     """
-    Извлекает имя станции и год из имени файла Rinex 3.
+    Извлекает имя станции, год и день в году из имени файла Rinex 3.
 
     Args:
         filename (str): Имя файла Rinex 3.
 
     Returns:
-        tuple: Имя станции и год в формате YY.
+        tuple: Имя станции, год (YYYY) и день в году (DOY).
     """
     base_name = os.path.basename(filename)
     station_name = base_name[:4]
-    year_str = base_name.split('_')[1][:4]
+    year_str = base_name.split('_')[2][:4]
+    doy_str = base_name.split('_')[2][4:7]
     year_full = int(year_str)
-    return station_name, year_full
+    doy = int(doy_str)
+    return station_name, year_full, doy
 
 
 def convert_rinex3_nav_to_rinex2(input_file: str, output_dir: str) -> str:
@@ -188,16 +191,16 @@ def convert_rinex3_nav_to_rinex2(input_file: str, output_dir: str) -> str:
     else:
         raise OSError("Unsupported operating system")
 
+    convbin_executable = os.path.abspath(convbin_executable)
+    input_file = os.path.abspath(input_file)
+
     if not os.path.isfile(convbin_executable):
         raise FileNotFoundError(f"convbin executable not found: {convbin_executable}")
 
-    station_name, year_full = extract_info_from_filename(input_file)
+    station_name, year_full, day_of_year = extract_info_from_filename(input_file)
     year_suffix = str(year_full)[-2:]
 
-    current_date = datetime.datetime.now()
-    day_of_year = current_date.timetuple().tm_yday
-
-    output_file_name = f"{station_name}{day_of_year:03d}0.{year_suffix}g"
+    output_file_name = f"{station_name.lower()}{day_of_year:03d}0.{year_suffix}g"
     output_file = os.path.join(output_dir, output_file_name)
 
     command = [convbin_executable, input_file, "-r", "rinex3", "-n", output_file]
@@ -241,11 +244,15 @@ def main(dt_begin: str, dt_end: str, collection_name: str) -> None:
                               filtered_file_list}
             with concurrent.futures.ThreadPoolExecutor() as extract_executor:
                 for future in concurrent.futures.as_completed(future_to_file):
-                    file_name = future.result()
-                    extract_executor.submit(extract_file, file_name, download_dir)
-                    test = file_name.split('.')
-                    test2 = '.'.join(test[:-1])
-                    unpacked_files.append(file_name.split('.')[-1])
+                    archive_name = future.result()
+                    extract_executor.submit(extract_file, archive_name, download_dir)
+                    file_name = '.'.join(archive_name.split('.')[:-1])
+                    # if file_name.endswith(".rnx"):
+                    #     file_name = convert_rinex3_nav_to_rinex2(os.path.join(download_dir, file_name), "./merge_files")
+                    unpacked_files.append(file_name)
+
+        merger = RinexMerger(download_dir, './brdc')
+        merger.merge_files('glo')
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -290,9 +297,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args.dt_begin, args.dt_end, args.collection)
-
-    # try:
-    #     output_rinex2_nav = convert_rinex3_nav_to_rinex2(input_rinex3_nav, output_directory)
-    #     print(f"Converted file saved to: {output_rinex2_nav}")
-    # except Exception as e:
-    #     print(f"An error occurred: {e}")
