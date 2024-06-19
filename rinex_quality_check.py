@@ -55,7 +55,8 @@ def is_valid_rinex(file_path):
                 break
 
             # Извлечение значений столбцов
-            columns = re.findall(r'-?\d+\.\d+D[+-]\d{2}', data_lines[i + j])
+            # columns = re.findall(r'-?\d+\.\d+D[+-]\d{2}', data_lines[i + j])
+            columns = re.findall(r'\s*-?\d*\.\d+D[+-]\d{2}', data_lines[i + j])
             if len(columns) != 4:
                 errors.append(f"Неверное количество столбцов данных: {data_lines[i + j].strip()}")
                 break

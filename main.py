@@ -9,6 +9,8 @@ import platform
 import concurrent.futures
 from rinex_merger import RinexMerger
 from typing import List, Dict, Any
+import configparser
+from pathlib import Path
 
 
 def get_collection_id(collection_name: str) -> int:
@@ -24,7 +26,10 @@ def get_collection_id(collection_name: str) -> int:
     Raises:
         ValueError: Если коллекция с заданным именем не найдена.
     """
-    response = requests.get("https://fcnd.ru/api/getFilter/")
+    headers = {
+        'User-Agent': 'Mozilla/5.0'
+    }
+    response = requests.get("https://fcnd.ru/api/getFilter/", headers=headers)
     response.raise_for_status()
     data = response.json()
     fields = data['answer']['t_meta_collection']['Fields']
@@ -46,13 +51,16 @@ def get_files_list(collection_id: int, dt_begin: str, dt_end: str) -> List[Dict[
     Returns:
         List[Dict[str, Any]]: Список файлов.
     """
+    headers = {
+        'User-Agent': 'Mozilla/5.0'
+    }
     url = "https://fcnd.ru/api/getData/"
     params = {
         "filter[time_begin]": dt_begin,
         "filter[time_end]": dt_end,
         "filter[meta_collection][]": collection_id
     }
-    response = requests.get(url, params=params)
+    response = requests.get(url, headers=headers, params=params)
     response.raise_for_status()
     return response.json()
 
@@ -88,6 +96,9 @@ def download_file(file: Dict[str, Any], download_dir: str) -> str:
     Returns:
         str: Имя загруженного файла.
     """
+    headers = {
+        'User-Agent': 'Mozilla/5.0'
+    }
     time_begin = file["pt_time_begin"]
     file_name = file["pk_file_name"]
     url = f"https://fcnd.ru/api/getData/"
@@ -95,7 +106,7 @@ def download_file(file: Dict[str, Any], download_dir: str) -> str:
         "datafile[time_begin]": time_begin,
         "datafile[file_name]": file_name
     }
-    response = requests.get(url, params=params, stream=True)
+    response = requests.get(url, headers=headers, params=params, stream=True)
     response.raise_for_status()
     file_path = os.path.join(download_dir, file_name)
     with open(file_path, 'wb') as file:
@@ -120,24 +131,31 @@ def get_win_path(unix_path):
     return win_path
 
 
-def extract_file(file_name: str, download_dir: str) -> None:
+def extract_file(file_name: str, download_dir: str) -> str:
     """
     Распаковывает архивный файл и удаляет его после успешной распаковки.
 
     Args:
         file_name (str): Имя файла для распаковки.
         download_dir (str): Путь к директории, где находится файл.
+
+    Returns:
+        str: Имя распакованного файла.
     """
     file_path = os.path.join(download_dir, file_name)
+    extracted_file_name = None
+
     if file_name.endswith(".zip"):
         with zipfile.ZipFile(file_path, 'r') as zip_file:
             extracted_files = zip_file.namelist()
             if len(extracted_files) == 1:
                 zip_file.extractall(download_dir)
+                extracted_file_name = extracted_files[0]
             else:
                 for extracted_file in extracted_files:
                     if re.search(r"\.\d{2}g", extracted_file):
                         zip_file.extract(extracted_file, download_dir)
+                        extracted_file_name = extracted_file
                         break
         os.remove(file_path)
     elif file_name.endswith(".Z"):
@@ -147,9 +165,12 @@ def extract_file(file_name: str, download_dir: str) -> None:
                 shell=True)
         else:
             subprocess.run(f"gunzip -f {file_path}", shell=True)
+        extracted_file_name = file_name[:-2]
+
+    return extracted_file_name
 
 
-def extract_info_from_filename(filename: str) -> (str, int, int):
+def extract_info_from_rinex3(filename: str) -> (str, int, int):
     """
     Извлекает имя станции, год и день в году из имени файла Rinex 3.
 
@@ -166,6 +187,14 @@ def extract_info_from_filename(filename: str) -> (str, int, int):
     year_full = int(year_str)
     doy = int(doy_str)
     return station_name, year_full, doy
+
+
+def extract_info_from_rinex2(input_file: str):
+    filename = os.path.basename(input_file)
+    station_name = filename[:4]
+    year = int(filename[9:11]) + 2000
+    day_of_year = int(filename[4:7])
+    return station_name, year, day_of_year
 
 
 def convert_rinex3_nav_to_rinex2(input_file: str, output_dir: str) -> str:
@@ -197,13 +226,13 @@ def convert_rinex3_nav_to_rinex2(input_file: str, output_dir: str) -> str:
     if not os.path.isfile(convbin_executable):
         raise FileNotFoundError(f"convbin executable not found: {convbin_executable}")
 
-    station_name, year_full, day_of_year = extract_info_from_filename(input_file)
+    station_name, year_full, day_of_year = extract_info_from_rinex3(input_file)
     year_suffix = str(year_full)[-2:]
 
     output_file_name = f"{station_name.lower()}{day_of_year:03d}0.{year_suffix}g"
     output_file = os.path.join(output_dir, output_file_name)
 
-    command = [convbin_executable, input_file, "-r", "rinex3", "-n", output_file]
+    command = [convbin_executable, input_file, "-r", "rinex", "-n", output_file]
 
     try:
         result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -219,40 +248,157 @@ def convert_rinex3_nav_to_rinex2(input_file: str, output_dir: str) -> str:
     return output_file
 
 
-def main(dt_begin: str, dt_end: str, collection_name: str) -> None:
+def convert_rinex2_nav_to_rinex3(input_file: str, output_dir: str) -> str:
+    """
+    Конвертирует файл Rinex 2 в Rinex 3 с использованием утилиты convbin и вносит необходимые изменения в заголовок.
+
+    Args:
+        input_file (str): Путь к входному файлу Rinex 2.
+        output_dir (str): Директория для сохранения выходного файла Rinex 3.
+
+    Returns:
+        str: Путь к выходному файлу Rinex 3.
+    """
+    system = platform.system().lower()
+
+    convbin_executable = ""
+    if system == "windows":
+        convbin_executable = os.path.join("executables", "convbin_win", "convbin.exe")
+    elif system == "linux":
+        convbin_executable = os.path.join("executables", "convbin_linux", "convbin")
+    elif system == "darwin":  # macOS
+        convbin_executable = os.path.join("executables", "convbin_mac", "convbin")
+    else:
+        raise OSError("Unsupported operating system")
+
+    convbin_executable = os.path.abspath(convbin_executable)
+    input_file = os.path.abspath(input_file)
+
+    if not os.path.isfile(convbin_executable):
+        raise FileNotFoundError(f"convbin executable not found: {convbin_executable}")
+
+    station_name, year_full, day_of_year = extract_info_from_rinex2(input_file)
+
+    output_file_name = f"{station_name.upper()}00RUS_R_{year_full}{day_of_year:03d}0000_01D_RN.rnx"
+    output_file = os.path.join(output_dir, output_file_name)
+
+    command = [convbin_executable, "-r", "rinex", "-v", "3.04", "-n", os.path.abspath(output_file), input_file]
+
+    try:
+        result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print(f"Conversion output: {result.stdout.decode('utf-8')}")
+        print(f"Conversion errors: {result.stderr.decode('utf-8')}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error during conversion: {e.stderr.decode('utf-8')}")
+        raise
+
+    if not os.path.isfile(output_file):
+        raise FileNotFoundError(f"Output file not found: {output_file}")
+
+    # Чтение второго файла для вставки второй строки
+    with open(input_file, 'r') as infile:
+        rinex2_lines = infile.readlines()
+    second_line = rinex2_lines[1].strip()
+
+    # Внесение изменений в заголовок RINEX 3
+    with open(output_file, 'r+') as outfile:
+        lines = outfile.readlines()
+        lines[0] = "     3.04           N: GNSS NAV DATA    R: GLONASS          RINEX VERSION / TYPE\n"
+        lines[1] = second_line + "\n"
+        lines.insert(2, "    18                                                      LEAP SECONDS\n")
+        outfile.seek(0)
+        outfile.writelines(lines)
+
+    return output_file
+
+
+def read_config(config_dir: str):
+    if not os.path.isfile(os.path.join(config_dir, 'config.ini')):
+        print('Config file not found')
+        exit(0)
+    config = configparser.ConfigParser()
+    config.read(os.path.join(config_dir, 'config.ini'))
+
+    return config
+
+
+def handle_file(file_name: str, dt_begin: str, download_dir: str) -> str:
+    """
+    Переименовывает файл, изменяет расширение и имя станции на нижний регистр,
+    и конвертирует файл RINEX 2 в RINEX 3, если это необходимо.
+
+    Args:
+        file_name (str): Имя архива.
+        dt_begin (str): Начальная дата и время в формате 'DD-MM-YYYY hh:mm:ss'.
+        download_dir (str): Директория загрузки.
+
+    Returns:
+        str: Новое имя файла.
+    """
+    if re.search(r"\.\d{2}g", file_name):
+        original_file_name = Path(os.path.abspath(os.path.join(download_dir, ''.join(
+            [file_name.split('.')[0], f'.{dt_begin[6:10][-2:]}g']))))
+        upd_file_name = ''.join([file_name.split('.')[0].lower(), f'.{dt_begin[6:10][-2:]}g'])
+        upd_name_file = original_file_name.with_name(upd_file_name)
+
+        if not original_file_name.exists():
+            raise FileNotFoundError(f"Файл не найден: {original_file_name}")
+
+        final_file_name = original_file_name.rename(upd_name_file).name
+    else:
+        final_file_name = '.'.join(file_name.split('.')[:-1])
+
+    if re.search(r"\.\d{2}g", final_file_name):
+        convert_rinex2_nav_to_rinex3(os.path.join(download_dir, final_file_name), download_dir)
+
+    return final_file_name
+
+
+def main(dt_begin: str, dt_end: str) -> None:
     """
     Основная функция, которая управляет процессом загрузки и распаковки файлов.
 
     Args:
         dt_begin (str): Начальная дата и время в формате 'DD-MM-YYYY hh:mm:ss'.
         dt_end (str): Конечная дата и время в формате 'DD-MM-YYYY hh:mm:ss'.
-        collection_name (str): Имя коллекции для загрузки файлов.
     """
     download_dir = "./downloads"
+    config_dir = "./config"
 
     if not os.path.exists(download_dir):
         os.makedirs(download_dir)
 
+    if not os.path.exists(config_dir):
+        print(f"The {config_dir} directory is missing.")
+        exit(0)
+
+    config = read_config(config_dir)
+    collections = config['FCND']['collections'].split(';')
+
     try:
-        collection_id = get_collection_id(collection_name)
-        files_list = get_files_list(collection_id, dt_begin, dt_end)
-        filtered_file_list = filter_files(files_list)
-        unpacked_files = list()
+        filtered_file_list = list()
+        for collection_name in collections:
+            collection_id = get_collection_id(collection_name)
+            files_list = get_files_list(collection_id, dt_begin, dt_end)
+            filtered_file_list.extend(filter_files(files_list[:4]))
 
         with concurrent.futures.ThreadPoolExecutor() as download_executor:
             future_to_file = {download_executor.submit(download_file, file, download_dir): file for file in
                               filtered_file_list}
-            with concurrent.futures.ThreadPoolExecutor() as extract_executor:
-                for future in concurrent.futures.as_completed(future_to_file):
-                    archive_name = future.result()
-                    extract_executor.submit(extract_file, archive_name, download_dir)
-                    file_name = '.'.join(archive_name.split('.')[:-1])
-                    # if file_name.endswith(".rnx"):
-                    #     file_name = convert_rinex3_nav_to_rinex2(os.path.join(download_dir, file_name), "./merge_files")
-                    unpacked_files.append(file_name)
+            download_results = {future: future.result() for future in concurrent.futures.as_completed(future_to_file)}
+
+        with concurrent.futures.ThreadPoolExecutor() as extract_executor:
+            extract_futures = [extract_executor.submit(extract_file, archive_name, download_dir) for archive_name in
+                               download_results.values()]
+            for future in concurrent.futures.as_completed(extract_futures):
+                file_name = future.result()
+                if file_name:
+                    handle_file(file_name, dt_begin, download_dir)
 
         merger = RinexMerger(download_dir, './brdc')
-        merger.merge_files('glo')
+        #merger.merge_files('glo')
+        merger.merge_files('glo', datetime.datetime.strptime(dt_begin, "%d-%m-%Y %H:%M:%S"),
+                           datetime.datetime.strptime(dt_end, "%d-%m-%Y %H:%M:%S"))
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -290,10 +436,7 @@ if __name__ == "__main__":
     parser.add_argument('--dt_end', type=validate_datetime, dest='dt_end',
                         default=datetime.date.today().strftime('%d-%m-%Y %H:%M:%S'),
                         help="end of file collection (format: DD-MM-YYYY hh:mm:ss")
-    parser.add_argument('--collection', type=str, dest='collection',
-                        default='IAC_SDCM_gnss_data_daily_30sec',
-                        help="the collection on the FSCD from which the files will be assembled")
 
     args = parser.parse_args()
 
-    main(args.dt_begin, args.dt_end, args.collection)
+    main(args.dt_begin, args.dt_end)
