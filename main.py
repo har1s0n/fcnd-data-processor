@@ -380,7 +380,7 @@ def main(dt_begin: str, dt_end: str) -> None:
         for collection_name in collections:
             collection_id = get_collection_id(collection_name)
             files_list = get_files_list(collection_id, dt_begin, dt_end)
-            filtered_file_list.extend(filter_files(files_list[:4]))
+            filtered_file_list.extend(filter_files(files_list))
 
         with concurrent.futures.ThreadPoolExecutor() as download_executor:
             future_to_file = {download_executor.submit(download_file, file, download_dir): file for file in
@@ -396,7 +396,6 @@ def main(dt_begin: str, dt_end: str) -> None:
                     handle_file(file_name, dt_begin, download_dir)
 
         merger = RinexMerger(download_dir, './brdc')
-        #merger.merge_files('glo')
         merger.merge_files('glo', datetime.datetime.strptime(dt_begin, "%d-%m-%Y %H:%M:%S"),
                            datetime.datetime.strptime(dt_end, "%d-%m-%Y %H:%M:%S"))
 
