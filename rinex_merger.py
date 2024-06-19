@@ -163,7 +163,6 @@ class RinexMerger:
         Returns:
             pd.DataFrame: Отфильтрованный DataFrame.
         """
-        df['datetime_utc'] = pd.to_datetime(df[['YYYY', 'MM', 'DD', 'hh', 'mm', 'ss']])
         return df[(df['datetime_utc'] >= start_date) & (df['datetime_utc'] <= end_date)]
 
     def process_header_data(self, df: pd.DataFrame, parser: Any) -> pd.DataFrame:
