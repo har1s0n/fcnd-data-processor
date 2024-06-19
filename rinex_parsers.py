@@ -76,7 +76,7 @@ class GLONASSRinexParser(BaseRinexParser):
     def parse_header(self, filepath):
         """ GLONASS """
         header_info = {}
-        with (open(filepath, 'r') as file):
+        with open(filepath, 'r') as file:
             for line in file:
                 if "END OF HEADER" in line:
                     break
