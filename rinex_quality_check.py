@@ -1,9 +1,13 @@
 import re
+import os
 import logging
 from datetime import datetime
 
 current_date = datetime.now().strftime('%Y-%m-%d')
 log_filename = f'rinex_quality_check_{current_date}.log'
+
+if not os.path.exists('./logs'):
+    os.makedirs('./logs')
 
 logging.basicConfig(filename=f'./logs/{log_filename}', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
