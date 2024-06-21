@@ -11,6 +11,11 @@ from rinex_merger import RinexMerger
 from typing import List, Dict, Any
 import configparser
 from pathlib import Path
+import pandas as pd
+import matplotlib
+
+matplotlib.use('Agg')
+from matplotlib import pyplot as plt
 
 
 def get_collection_id(collection_name: str) -> int:
@@ -354,6 +359,61 @@ def handle_file(file_name: str, dt_begin: str, download_dir: str) -> str:
     return final_file_name
 
 
+def analyze_merge_results(result_df: pd.DataFrame) -> None:
+    """
+    Анализирует результат работы функции merge_files и строит график отсутствующих измерений.
+
+    Args:
+        result_df (pd.DataFrame): DataFrame с объединенными спутниковыми данными.
+    """
+    plots_dir = './plots'
+    if not os.path.exists(plots_dir):
+        os.makedirs(plots_dir)
+
+    plt.ioff()
+    min_date = result_df['datetime_utc'].min()
+    max_date = result_df['datetime_utc'].max()
+    all_times = pd.date_range(start=min_date, end=max_date, freq='30min')
+
+    unique_svs = result_df['SV'].unique()
+
+    sv_data = {sv: [] for sv in unique_svs}
+
+    for sv in unique_svs:
+        sv_times = result_df[result_df['SV'] == sv]['datetime_utc']
+        sv_data[sv] = [time in sv_times.values for time in all_times]
+
+    # Создаем график
+    fig, ax = plt.subplots(figsize=(20, 15))
+    ax.set_title('Зоны видимости НКА ГНСС ГЛОНАСС')
+    ax.set_xlabel('Дата и время')
+    ax.set_ylabel('НКА')
+
+    # Отображаем данные на графике
+    for idx, sv in enumerate(unique_svs):
+        x = all_times
+        c = ['green' if available else 'red' for available in sv_data[sv]]
+        for i in range(len(all_times) - 1):
+            ax.fill_between(x[i:i + 2], y1=idx - 0.4, y2=idx + 0.4, color=c[i])
+
+    ax.set_yticks(range(len(unique_svs)))
+    ax.set_yticklabels(unique_svs)
+    plt.xticks(rotation=45)
+    plt.grid(True)
+
+    green_patch = plt.Line2D([0], [0], linestyle='None', marker='_', color='green', markersize=20,
+                             label='Измерение есть')
+    red_patch = plt.Line2D([0], [0], linestyle='None', marker='_', color='red', markersize=20,
+                           label='Измерение отсутствует')
+
+    plt.legend(handles=[green_patch, red_patch], loc='best', bbox_to_anchor=(0.3, -0.2), ncol=2)
+    fig.subplots_adjust(bottom=0.5)
+
+    plt.savefig(os.path.abspath(
+        os.path.join(plots_dir, f"visibility_plot_{datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}.png")),
+        bbox_inches='tight')
+
+
 def main(dt_begin: str, dt_end: str) -> None:
     """
     Основная функция, которая управляет процессом загрузки и распаковки файлов.
@@ -396,8 +456,9 @@ def main(dt_begin: str, dt_end: str) -> None:
                     handle_file(file_name, dt_begin, download_dir)
 
         merger = RinexMerger(download_dir, './brdc')
-        merger.merge_files('glo', datetime.datetime.strptime(dt_begin, "%d-%m-%Y %H:%M:%S"),
-                           datetime.datetime.strptime(dt_end, "%d-%m-%Y %H:%M:%S"))
+        brdc_file_dataframe = merger.merge_files('glo', datetime.datetime.strptime(dt_begin, "%d-%m-%Y %H:%M:%S"),
+                                                 datetime.datetime.strptime(dt_end, "%d-%m-%Y %H:%M:%S"))
+        analyze_merge_results(brdc_file_dataframe)
 
     except Exception as e:
         print(f"An error occurred: {e}")
