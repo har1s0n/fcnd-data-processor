@@ -38,51 +38,57 @@ def is_valid_rinex(file_path):
     for line in file_content[:header_end_index + 1]:
         logging.info(line.strip())
 
-    # Проверка данных спутников начинается после строки "END OF HEADER"
-    data_lines = file_content[header_end_index + 1:]
-    i = 0
-    while i < len(data_lines):
-        if data_lines[i].strip() == "":
-            i += 1
-            continue
+        # Проверка данных спутников начинается после строки "END OF HEADER"
+        data_lines = file_content[header_end_index + 1:]
+        i = 0
+        while i < len(data_lines):
+            if data_lines[i].strip() == "":
+                i += 1
+                continue
 
-        # Проверка формата заголовка данных (первая строка блока)
-        header_match = re.match(r'^[A-Z]\d{2} \d{4} \d{2} \d{2} \d{2} \d{2} \d{2}', data_lines[i])
-        if not header_match:
-            errors.append(f"Неверный формат заголовка данных: {data_lines[i].strip()}")
-            break
-
-        # Проверка следующих 3 строк по 4 столбца данных
-        for j in range(1, 4):
-            if i + j >= len(data_lines):
-                errors.append("Недостаточно строк данных для проверки.")
+            # Проверка формата заголовка данных (первая строка блока)
+            header_match = re.match(r'^[A-Z]\d{2}\s+\d{4}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}',
+                                    data_lines[i])
+            if not header_match:
+                errors.append(f"Неверный формат заголовка данных: {data_lines[i].strip()}")
                 break
 
-            # Извлечение значений столбцов
-            # columns = re.findall(r'-?\d+\.\d+D[+-]\d{2}', data_lines[i + j])
-            columns = re.findall(r'\s*-?\d*\.\d+D[+-]\d{2}', data_lines[i + j])
-            if len(columns) != 4:
-                errors.append(f"Неверное количество столбцов данных: {data_lines[i + j].strip()}")
+            # Проверка значений после заголовка данных
+            data_values = re.findall(r'\s*-?\d*\.\d+D[+-]\d{2}', data_lines[i])
+            if len(data_values) != 3:
+                errors.append(f"Неверное количество значений в заголовке данных: {data_lines[i].strip()}")
                 break
 
-            # Проверка на аномально большие или маленькие числа
-            for col_idx, value in enumerate(columns):
-                number = float(value.replace('D', 'E'))
-                if col_idx == 0:  # Пределы для псевдодальности (км)
-                    if number != 0 and (number > 4e4 or number < -4e4):
-                        errors.append(f"Аномально большое или маленькое значение псевдодальности: {value}")
-                elif col_idx == 1:  # Пределы для скорости (км/с)
-                    if number != 0 and (number > 3e1 or number < -3e1):
-                        errors.append(f"Аномально большое или маленькое значение скорости: {value}")
-                elif col_idx == 2:  # Пределы для ускорения (км/с²)
-                    if number != 0 and (number > 3e-2 or number < -3e-2):
-                        errors.append(f"Аномально большое или маленькое значение ускорения: {value}")
-                elif col_idx == 3:
-                    pass
+            # Проверка следующих 3 строк по 4 столбца данных
+            for j in range(1, 4):
+                if i + j >= len(data_lines):
+                    errors.append("Недостаточно строк данных для проверки.")
+                    break
 
-        i += 4
+                # Извлечение значений столбцов
+                columns = re.findall(r'\s*-?\d*\.\d+D[+-]\d{2}', data_lines[i + j])
+                if len(columns) != 4:
+                    errors.append(f"Неверное количество столбцов данных: {data_lines[i + j].strip()}")
+                    break
 
-    return len(errors) == 0, errors
+                # Проверка на аномально большие или маленькие числа
+                for col_idx, value in enumerate(columns):
+                    number = float(value.replace('D', 'E'))
+                    if col_idx == 0:  # Пределы для псевдодальности (км)
+                        if number != 0 and (number > 4e4 or number < -4e4):
+                            errors.append(f"Аномально большое или маленькое значение псевдодальности: {value}")
+                    elif col_idx == 1:  # Пределы для скорости (км/с)
+                        if number != 0 and (number > 3e1 or number < -3e1):
+                            errors.append(f"Аномально большое или маленькое значение скорости: {value}")
+                    elif col_idx == 2:  # Пределы для ускорения (км/с²)
+                        if number != 0 and (number > 3e-2 or number < -3e-2):
+                            errors.append(f"Аномально большое или маленькое значение ускорения: {value}")
+                    elif col_idx == 3:
+                        pass
+
+            i += 4
+
+        return len(errors) == 0, errors
 
 
 def log_results(file_name, status, errors):
