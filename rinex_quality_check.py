@@ -47,9 +47,15 @@ def is_valid_rinex(file_path):
             continue
 
         # Проверка формата заголовка данных (первая строка блока)
-        header_match = re.match(r'^[A-Z]\d{2} \d{4} \d{2} \d{2} \d{2} \d{2} \d{2}', data_lines[i])
+        header_match = re.match(r'^[A-Z]\d{2}\s+\d{4}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}', data_lines[i])
         if not header_match:
             errors.append(f"Неверный формат заголовка данных: {data_lines[i].strip()}")
+            break
+
+        # Проверка значений после заголовка данных
+        data_values = re.findall(r'\s*-?\d*\.\d+[DE][+-]\d{2}', data_lines[i])
+        if len(data_values) != 3:
+            errors.append(f"Неверное количество значений в заголовке данных: {data_lines[i].strip()}")
             break
 
         # Проверка следующих 3 строк по 4 столбца данных
@@ -59,8 +65,7 @@ def is_valid_rinex(file_path):
                 break
 
             # Извлечение значений столбцов
-            # columns = re.findall(r'-?\d+\.\d+D[+-]\d{2}', data_lines[i + j])
-            columns = re.findall(r'\s*-?\d*\.\d+D[+-]\d{2}', data_lines[i + j])
+            columns = re.findall(r'\s*-?\d*\.\d+[DE][+-]\d{2}', data_lines[i + j])
             if len(columns) != 4:
                 errors.append(f"Неверное количество столбцов данных: {data_lines[i + j].strip()}")
                 break

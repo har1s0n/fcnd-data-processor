@@ -87,8 +87,20 @@ class GLONASSRinexParser(BaseRinexParser):
 
                 if "PGM / RUN BY / DATE" in line:
                     if "UTC" in line:
-                        header_info["datetime_utc"] = datetime.strptime(line[40:55],
-                                                                        '%Y%m%d %H%M%S')  # datetime_string = datetime_object.strftime('%Y%m%d %H%M%S')
+                        try:
+                            header_info["datetime_utc"] = datetime.strptime(line[40:55].strip(), '%Y%m%d %H%M%S')
+                        except ValueError:
+                            header_info["datetime_utc"] = datetime.strptime(line[40:56].strip(), '%Y%m%d %H%M%S')
+                        continue
+                    else:
+                        try:
+                            test = line[40:55].strip()
+                            header_info["datetime_utc"] = datetime.strptime(line[40:55].strip(), '%d-%b-%y %H:%M')
+                        except ValueError:
+                            try:
+                                header_info["datetime_utc"] = datetime.strptime(line[40:56].strip(), '%Y%m%d %H%M%S')
+                            except ValueError:
+                                header_info["datetime_utc"] = datetime.strptime(line[32:45].strip(), '%d-%b-%y %H:%M')
                         continue
 
                 if ("TIME SYSTEM CORR" in line) and ("GLUT" in line):
@@ -101,8 +113,8 @@ class GLONASSRinexParser(BaseRinexParser):
                     header_info["leap_sec"] = int(line[4:7].strip())
                     continue
 
-            df = pd.DataFrame(
-                {key: [value] if isinstance(value, list) else [value] for key, value in header_info.items()})
+        df = pd.DataFrame(
+            {key: [value] if isinstance(value, list) else [value] for key, value in header_info.items()})
         return df
 
     def parse_sv_data(self, filepath):
