@@ -3,11 +3,10 @@ import os
 import logging
 from datetime import datetime
 
+# Настройка логирования
 current_date = datetime.now().strftime('%Y-%m-%d')
 log_filename = f'rinex_quality_check_{current_date}.log'
-
-if not os.path.exists('./logs'):
-    os.makedirs('./logs')
+os.makedirs('./logs', exist_ok=True)
 
 logging.basicConfig(filename=f'./logs/{log_filename}', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -15,9 +14,19 @@ logging.basicConfig(filename=f'./logs/{log_filename}', level=logging.INFO,
 
 def is_valid_rinex(file_path):
     errors = []
-    file_name = file_path.split('/')[-1]
+    file_name = os.path.basename(file_path)
 
-    # Чтение файла
+    # Системы, которые мы пропускаем (например, GPS, Galileo, BeiDou)
+    skip_systems = ['G', 'E', 'C']
+
+    # Правила: сколько строк занимает запись для каждой системы
+    system_block_sizes = {
+        'G': 8,  # GPS
+        'E': 8,  # Galileo
+        'C': 8,  # BeiDou
+        'R': 4  # ГЛОНАСС
+    }
+
     try:
         with open(file_path, 'r') as file:
             file_content = file.readlines()
@@ -25,7 +34,7 @@ def is_valid_rinex(file_path):
         errors.append(f"Ошибка при чтении файла: {str(e)}")
         return False, errors
 
-    # Поиск строки "END OF HEADER"
+    # Поиск конца заголовка
     try:
         header_end_index = next(i for i, line in enumerate(file_content) if "END OF HEADER" in line)
     except StopIteration:
@@ -38,54 +47,72 @@ def is_valid_rinex(file_path):
     for line in file_content[:header_end_index + 1]:
         logging.info(line.strip())
 
-    # Проверка данных спутников начинается после строки "END OF HEADER"
+    # Обработка спутниковых данных
     data_lines = file_content[header_end_index + 1:]
     i = 0
     while i < len(data_lines):
-        if data_lines[i].strip() == "":
+        line = data_lines[i].strip()
+        if line == "":
             i += 1
             continue
 
-        # Проверка формата заголовка данных (первая строка блока)
-        header_match = re.match(r'^[A-Z]\d{2}\s+\d{4}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}', data_lines[i])
+        # Проверка заголовка спутниковой записи
+        header_match = re.match(r'^([A-Z])\s?\d{1,2}\s+\d{4}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}', line)
         if not header_match:
-            errors.append(f"Неверный формат заголовка данных: {data_lines[i].strip()}")
+            errors.append(f"Неверный формат заголовка спутника: {line}")
+            i += 1
+            continue
+
+        system_letter = header_match.group(1).upper()
+
+        block_size = system_block_sizes.get(system_letter)
+        if block_size is None:
+            errors.append(f"Неизвестная система спутников: {system_letter} в строке: {line}")
+            i += 1
+            continue
+
+        # Если система в списке пропускаемых — пропускаем весь блок
+        if system_letter in skip_systems:
+            logging.info(f"Пропущен спутник {system_letter}: {line}")
+            i += block_size
+            continue
+
+        # Проверяем, хватает ли строк для обработки блока
+        if i + block_size - 1 >= len(data_lines):
+            errors.append(f"Недостаточно строк данных для спутника {line}")
             break
 
-        # Проверка значений после заголовка данных
-        data_values = re.findall(r'\s*-?\d*\.\d+[DE][+-]\d{2}', data_lines[i])
-        if len(data_values) != 3:
-            errors.append(f"Неверное количество значений в заголовке данных: {data_lines[i].strip()}")
-            break
+        # Проверяем данные в блоке
+        block_lines = data_lines[i:i + block_size]
+        for idx, block_line in enumerate(block_lines):
+            block_line = block_line.rstrip()
+            floats = re.findall(r'[-\s]?\d*\.\d+[DE][\+\-]\d{2}', block_line)
 
-        # Проверка следующих 3 строк по 4 столбца данных
-        for j in range(1, 4):
-            if i + j >= len(data_lines):
-                errors.append("Недостаточно строк данных для проверки.")
-                break
+            # На первой строке (заголовок) обычно минимум 3 значения
+            if idx == 0:
+                if len(floats) < 3:
+                    errors.append(f"Недостаточно значений в заголовке спутника: {block_line}")
+            else:
+                # Для каждой строки эфемерид (дальше) должно быть 4 значения
+                if len(floats) != 4:
+                    errors.append(f"Неверное количество данных на строке {idx + 1} спутника: {block_line}")
 
-            # Извлечение значений столбцов
-            columns = re.findall(r'\s*-?\d*\.\d+[DE][+-]\d{2}', data_lines[i + j])
-            if len(columns) != 4:
-                errors.append(f"Неверное количество столбцов данных: {data_lines[i + j].strip()}")
-                break
+            # Проверка диапазона значений
+            for value in floats:
+                try:
+                    number = float(value.replace('D', 'E'))
+                except ValueError:
+                    errors.append(f"Некорректное числовое значение: {value}")
+                    continue
 
-            # Проверка на аномально большие или маленькие числа
-            for col_idx, value in enumerate(columns):
-                number = float(value.replace('D', 'E'))
-                if col_idx == 0:  # Пределы для псевдодальности (км)
-                    if number != 0 and (number > 4e4 or number < -4e4):
-                        errors.append(f"Аномально большое или маленькое значение псевдодальности: {value}")
-                elif col_idx == 1:  # Пределы для скорости (км/с)
-                    if number != 0 and (number > 3e1 or number < -3e1):
-                        errors.append(f"Аномально большое или маленькое значение скорости: {value}")
-                elif col_idx == 2:  # Пределы для ускорения (км/с²)
-                    if number != 0 and (number > 3e-2 or number < -3e-2):
-                        errors.append(f"Аномально большое или маленькое значение ускорения: {value}")
-                elif col_idx == 3:
-                    pass
+                if idx == 0:
+                    if abs(number) > 1e6:
+                        errors.append(f"Аномально большое значение в заголовке спутника: {value}")
+                else:
+                    if abs(number) > 1e9:
+                        errors.append(f"Аномально большое значение орбитальных параметров: {value}")
 
-        i += 4
+        i += block_size  # Переход к следующему спутнику
 
     return len(errors) == 0, errors
 

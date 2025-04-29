@@ -83,6 +83,7 @@ def filter_files(files_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     file_patterns = [
         r"\.\d{2}g\.Z$",
         r"RN\.rnx",
+        r"\.RNX\.gz$",
         lambda filename: filename.endswith(".zip") and not re.search(r"\.rnx", filename)
     ]
     return [file for file in files_list if any(
@@ -136,6 +137,15 @@ def get_win_path(unix_path):
     return win_path
 
 
+import os
+import platform
+import subprocess
+import zipfile
+import re
+import gzip
+import shutil
+
+
 def extract_file(file_name: str, download_dir: str) -> str:
     """
     Распаковывает архивный файл и удаляет его после успешной распаковки.
@@ -163,14 +173,25 @@ def extract_file(file_name: str, download_dir: str) -> str:
                         extracted_file_name = extracted_file
                         break
         os.remove(file_path)
+
     elif file_name.endswith(".Z"):
         if platform.system().lower() == "windows":
             subprocess.run(
-                f"\"C:\Program Files\Git\\bin\\bash.exe\" -c \"gunzip -f {get_unix_path(os.path.abspath(file_path))}\"",
+                f"\"C:\\Program Files\\Git\\bin\\bash.exe\" -c \"gunzip -f {get_unix_path(os.path.abspath(file_path))}\"",
                 shell=True)
         else:
             subprocess.run(f"gunzip -f {file_path}", shell=True)
         extracted_file_name = file_name[:-2]
+
+    elif file_name.endswith(".gz"):
+        extracted_file_name = file_name[:-3]
+        extracted_file_path = os.path.join(download_dir, extracted_file_name)
+
+        with gzip.open(file_path, 'rb') as f_in:
+            with open(extracted_file_path, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+
+        os.remove(file_path)
 
     return extracted_file_name
 
@@ -327,34 +348,50 @@ def read_config(config_dir: str):
     return config
 
 
+import os
+import re
+from pathlib import Path
+
+
 def handle_file(file_name: str, dt_begin: str, download_dir: str) -> str:
     """
-    Переименовывает файл, изменяет расширение и имя станции на нижний регистр,
-    и конвертирует файл RINEX 2 в RINEX 3, если это необходимо.
+    Переименовывает файл: приводит имя станции и расширение к нижнему регистру,
+    а также конвертирует файл RINEX 2 в RINEX 3, если это необходимо.
 
     Args:
-        file_name (str): Имя архива.
+        file_name (str): Имя файла.
         dt_begin (str): Начальная дата и время в формате 'DD-MM-YYYY hh:mm:ss'.
         download_dir (str): Директория загрузки.
 
     Returns:
         str: Новое имя файла.
     """
-    if re.search(r"\.\d{2}g", file_name):
-        original_file_name = Path(os.path.abspath(os.path.join(download_dir, ''.join(
-            [file_name.split('.')[0], f'.{dt_begin[6:10][-2:]}g']))))
-        upd_file_name = ''.join([file_name.split('.')[0].lower(), f'.{dt_begin[6:10][-2:]}g'])
-        upd_name_file = original_file_name.with_name(upd_file_name)
+    file_path = Path(download_dir) / file_name
 
-        if not original_file_name.exists():
-            raise FileNotFoundError(f"Файл не найден: {original_file_name}")
+    if not file_path.exists():
+        raise FileNotFoundError(f"Файл не найден: {file_path}")
 
-        final_file_name = original_file_name.rename(upd_name_file).name
+    # Определяем, является ли файл классическим .??g файлом
+    if re.search(r"\.\d{2}g$", file_name, re.IGNORECASE):
+        new_file_name = f"{file_path.stem.lower()}.{dt_begin[6:10][-2:]}g"
+        new_file_path = file_path.with_name(new_file_name)
+
+        file_path.rename(new_file_path)
+        final_file_name = new_file_path.name
+
+        convert_rinex2_nav_to_rinex3(str(new_file_path), download_dir)
+
     else:
-        final_file_name = '.'.join(file_name.split('.')[:-1])
+        # Обработка файлов типа .RNX
+        stem_lower = file_path.stem.lower()
+        suffix_lower = file_path.suffix.lower()  # .RNX -> .rnx
+        new_file_name = stem_lower + suffix_lower
+        new_file_path = file_path.with_name(new_file_name)
 
-    if re.search(r"\.\d{2}g", final_file_name):
-        convert_rinex2_nav_to_rinex3(os.path.join(download_dir, final_file_name), download_dir)
+        if new_file_path != file_path:
+            file_path.rename(new_file_path)
+
+        final_file_name = new_file_path.name
 
     return final_file_name
 

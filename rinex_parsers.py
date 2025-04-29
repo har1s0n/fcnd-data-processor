@@ -128,15 +128,20 @@ class GLONASSRinexParser(BaseRinexParser):
                     break
 
             while True:
-                sat_data = {}
-
-                # Чтение первой строки
                 line = replace_D_to_E(file.readline())
                 if not line:  # конец файла
                     break
 
-                # Парсим по жестко заданному формату
-                sat_data["SV_label"] = line[0:3].strip()
+                sv_label = line[0:3].strip()
+
+                if not sv_label.startswith('R'):
+                    # пропускаем следующие 3 строки, чтобы сдвинуться на следующую запись
+                    for _ in range(3):
+                        file.readline()
+                    continue
+
+                sat_data = {}
+                sat_data["SV_label"] = sv_label
                 sat_data["SV"] = int(line[1:3].strip())
                 sat_data["YYYY"] = int(line[4:8].strip())
                 sat_data["MM"] = int(line[9:11].strip())
@@ -152,7 +157,6 @@ class GLONASSRinexParser(BaseRinexParser):
                 # Чтение строк 2-4
                 for i in range(2, 5):
                     line = replace_D_to_E(file.readline())
-                    line = line.replace("D", "E")
                     for j in range(4):
                         start_idx = 4 + j * 19
                         end_idx = start_idx + 19
