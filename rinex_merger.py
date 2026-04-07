@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 import datetime
-from rinex_parsers import GLONASSRinexParser
+from rinex_parsers import GLONASSRinexParser, GPSRinexParser, MixedRinexParser
 import logging.config
 import rinex_quality_check
 from typing import Any, Optional
@@ -20,7 +20,9 @@ class RinexMerger:
         self.input_files_dir = input_files_dir
         self.output_files_dir = output_files_dir
         self.parsers = {
-            "glo": GLONASSRinexParser
+            "glo": GLONASSRinexParser,
+            "gps": GPSRinexParser,
+            "mixed": MixedRinexParser
         }
 
     def merge_files(self, gnss_type: str, start_date: Optional[datetime.datetime] = None,
@@ -36,10 +38,9 @@ class RinexMerger:
         Returns:
             pd.DataFrame: DataFrame с объединенными спутниковыми данными.
         """
-        gnss_abbreviature = self.get_gnss_abbreviature(gnss_type)
         parser = self.parsers[gnss_type]()
 
-        gnss_files = self.get_gnss_files(gnss_abbreviature)
+        gnss_files = self.get_gnss_files()
 
         result_df_sv_data, result_df_header_data = self.parse_files(gnss_files, parser, start_date, end_date)
 
@@ -68,19 +69,11 @@ class RinexMerger:
         }
         return gnss_abbreviature_map[gnss_type]
 
-    def get_gnss_files(self, gnss_abbreviature: str) -> list:
-        """
-        Получает список файлов GNSS для указанного типа GNSS.
-
-        Args:
-            gnss_abbreviature (str): Аббревиатура GNSS.
-
-        Returns:
-            list: Список файлов GNSS.
-        """
+    def get_gnss_files(self) -> list:
         all_files = [f for f in os.listdir(self.input_files_dir) if
                      os.path.isfile(os.path.join(self.input_files_dir, f))]
-        return [f for f in all_files if gnss_abbreviature.lower() + ".rnx" in f.lower()]
+
+        return [f for f in all_files if f.lower().endswith(".rnx")]
 
     def validate_rinex_file(self, filepath: str) -> bool:
         """
@@ -124,10 +117,12 @@ class RinexMerger:
             if df_header is not None:
                 result_df_header_data = pd.concat([result_df_header_data, df_header], ignore_index=True)
 
-            if df_sv_data is not None:
-                if start_date and end_date:
-                    df_sv_data = self.filter_by_date(df_sv_data, start_date, end_date)
-                result_df_sv_data = pd.concat([result_df_sv_data, df_sv_data], ignore_index=True)
+            if df_sv_data.shape == (0, 0):
+                continue
+
+            if start_date and end_date:
+                df_sv_data = self.filter_by_date(df_sv_data, start_date, end_date)
+            result_df_sv_data = pd.concat([result_df_sv_data, df_sv_data], ignore_index=True)
 
         return result_df_sv_data, result_df_header_data
 
