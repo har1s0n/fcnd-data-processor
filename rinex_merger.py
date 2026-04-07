@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 import datetime
-from rinex_parsers import GLONASSRinexParser
+from rinex_parsers import GLONASSRinexParser, GPSRinexParser, MixedRinexParser
 import logging.config
 import rinex_quality_check
 from typing import Any, Optional
@@ -20,7 +20,9 @@ class RinexMerger:
         self.input_files_dir = input_files_dir
         self.output_files_dir = output_files_dir
         self.parsers = {
-            "glo": GLONASSRinexParser
+            "glo": GLONASSRinexParser,
+            "gps": GPSRinexParser,
+            "mixed": MixedRinexParser
         }
 
     def merge_files(self, gnss_type: str, start_date: Optional[datetime.datetime] = None,
@@ -36,7 +38,6 @@ class RinexMerger:
         Returns:
             pd.DataFrame: DataFrame с объединенными спутниковыми данными.
         """
-        # gnss_abbreviature = self.get_gnss_abbreviature(gnss_type)
         parser = self.parsers[gnss_type]()
 
         gnss_files = self.get_gnss_files()

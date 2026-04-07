@@ -86,9 +86,18 @@ def filter_files(files_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         r"\.RNX\.gz$",
         lambda filename: filename.endswith(".zip") and not re.search(r"\.rnx", filename)
     ]
-    return [file for file in files_list if any(
-        re.search(pattern, file["pk_file_name"]) if isinstance(pattern, str) else pattern(file["pk_file_name"]) for
-        pattern in file_patterns)]
+    # return [file for file in files_list if any(
+    #     re.search(pattern, file["pk_file_name"]) if isinstance(pattern, str) else pattern(file["pk_file_name"]) for
+    #     pattern in file_patterns)]
+
+    return [
+        file for file in files_list
+        # Проверяем наличие EKBG в имени файла (приводим к верхнему регистру для надежности)
+        if "EKBG" in file.get("pk_file_name", "").upper() and any(
+            re.search(pattern, file["pk_file_name"]) if isinstance(pattern, str) else pattern(file["pk_file_name"])
+            for pattern in file_patterns
+        )
+    ]
 
 
 def download_file(file: Dict[str, Any], download_dir: str) -> str:
@@ -493,7 +502,7 @@ def main(dt_begin: str, dt_end: str) -> None:
                     handle_file(file_name, dt_begin, download_dir)
 
         merger = RinexMerger(download_dir, './brdc')
-        brdc_file_dataframe = merger.merge_files('glo', datetime.datetime.strptime(dt_begin, "%d-%m-%Y %H:%M:%S"),
+        brdc_file_dataframe = merger.merge_files('mixed', datetime.datetime.strptime(dt_begin, "%d-%m-%Y %H:%M:%S"),
                                                  datetime.datetime.strptime(dt_end, "%d-%m-%Y %H:%M:%S"))
         analyze_merge_results(brdc_file_dataframe)
 
