@@ -1,18 +1,20 @@
-import subprocess
-import zipfile
 import requests
 import argparse
 import datetime
-import os
-import re
-import platform
 import concurrent.futures
 from rinex_merger import RinexMerger
 from typing import List, Dict, Any
 import configparser
-from pathlib import Path
 import pandas as pd
 import matplotlib
+import platform
+import subprocess
+import zipfile
+import gzip
+import shutil
+import os
+import re
+from pathlib import Path
 
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -144,15 +146,6 @@ def get_win_path(unix_path):
         win_path = f'{drive_letter}{unix_path}'
 
     return win_path
-
-
-import os
-import platform
-import subprocess
-import zipfile
-import re
-import gzip
-import shutil
 
 
 def extract_file(file_name: str, download_dir: str) -> str:
@@ -355,11 +348,6 @@ def read_config(config_dir: str):
     config.read(os.path.join(config_dir, 'config.ini'))
 
     return config
-
-
-import os
-import re
-from pathlib import Path
 
 
 def handle_file(file_name: str, dt_begin: str, download_dir: str) -> str:
